@@ -100,6 +100,36 @@ kiri chart animals age bar
 kiri show  animals --json
 ```
 
+## Dietary tracker
+
+Built-in diet tracking via `kiri diet` — logs meals as CSV, compares daily macros to your goals, plots trends over time.
+
+```bash
+# First time setup
+kiri diet init
+
+# Set daily goals
+kiri diet goal set kcal=2200 protein_g=150 carbs_g=250 fat_g=70
+
+# Log a meal (date is set automatically to today)
+kiri diet log "kurczak z ryżem" kcal=650 protein_g=45 carbs_g=80 fat_g=12
+kiri diet log "jajecznica" kcal=280 protein_g=21 carbs_g=2 fat_g=20
+
+# Today's summary — meals + progress bars vs goals
+kiri diet today
+
+# Show current goals
+kiri diet goal show
+
+# Charts (requires youplot)
+kiri diet chart kcal 7       # calories, last 7 days
+kiri diet chart protein_g 14 # protein, last 14 days
+```
+
+Available macros: `kcal`, `protein_g`, `carbs_g`, `fat_g`.
+
+Data is stored in two regular CSV tables (`meals`, `diet_goals`) managed by the same `kirid` server — no extra setup needed.
+
 ## Chart types
 
 ```bash
