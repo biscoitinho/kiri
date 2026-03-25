@@ -1,0 +1,158 @@
+#!/usr/bin/env ruby
+# kirid — CSV API server
+require 'sinatra'
+require 'sinatra/reloader' if development?
+require 'csv'
+require 'json'
+require 'tty-table'
+
+set :port, 7777
+set :bind, '0.0.0.0'
+CSV_DIR = File.expand_path(ENV['CSV_DIR'] || './data')
+
+# ── helpers ────────────────────────────────────────────────────────────────────
+
+def csv_path(name)
+  raise "Invalid name" unless name =~ /\A[\w\-]+\z/
+  File.join(CSV_DIR, "#{name}.csv")
+end
+
+def load_csv(name)
+  path = csv_path(name)
+  halt 404, format_error("File '#{name}.csv' not found") unless File.exist?(path)
+  rows = CSV.read(path, headers: true)
+  [rows.headers, rows.map(&:fields)]
+end
+
+def save_csv(name, headers, rows)
+  CSV.open(csv_path(name), 'w') do |csv|
+    csv << headers
+    rows.each { |r| csv << r }
+  end
+end
+
+def wants_json?
+  accept = request.env['HTTP_ACCEPT'] || ''
+  agent  = request.env['HTTP_USER_AGENT'] || ''
+  accept.include?('application/json') || accept.include?('*/*') && !agent.start_with?('curl')
+end
+
+def format_table(headers, rows)
+  return "( empty )\n" if rows.empty?
+  # add # column
+  indexed = rows.each_with_index.map { |r, i| [i, *r] }
+  table = TTY::Table.new(header: ['#', *headers], rows: indexed)
+  table.render(:unicode, padding: [0, 1]) + "\n"
+end
+
+def format_json(headers, rows)
+  data = rows.each_with_index.map do |r, i|
+    { '_id' => i }.merge(headers.zip(r).to_h)
+  end
+  JSON.pretty_generate(data) + "\n"
+end
+
+def format_error(msg)
+  content_type 'text/plain'
+  "Error: #{msg}\n"
+end
+
+def render_data(headers, rows)
+  if wants_json?
+    content_type 'application/json'
+    format_json(headers, rows)
+  else
+    content_type 'text/plain'
+    format_table(headers, rows)
+  end
+end
+
+# ── routes ─────────────────────────────────────────────────────────────────────
+
+# List available CSV files
+get '/' do
+  files = Dir.glob(File.join(CSV_DIR, '*.csv')).map { |f| File.basename(f, '.csv') }
+  if wants_json?
+    content_type 'application/json'
+    JSON.pretty_generate(files) + "\n"
+  else
+    content_type 'text/plain'
+    "Available tables:\n" + files.map { |f| "  #{f}" }.join("\n") + "\n"
+  end
+end
+
+# GET all rows
+get '/:name' do
+  headers, rows = load_csv(params[:name])
+  render_data(headers, rows)
+end
+
+# GET single row by id
+get '/:name/:id' do
+  headers, rows = load_csv(params[:name])
+  id = params[:id].to_i
+  halt 404, format_error("Row #{id} not found") unless rows[id]
+  render_data(headers, [rows[id]])
+end
+
+# POST — add new row
+post '/:name' do
+  headers, rows = load_csv(params[:name])
+  body_params = parse_body
+  new_row = headers.map { |h| body_params[h] || '' }
+  rows << new_row
+  save_csv(params[:name], headers, rows)
+  id = rows.length - 1
+  content_type 'text/plain'
+  "Created row ##{id}\n"
+end
+
+# PUT — update row by id
+put '/:name/:id' do
+  headers, rows = load_csv(params[:name])
+  id = params[:id].to_i
+  halt 404, format_error("Row #{id} not found") unless rows[id]
+  body_params = parse_body
+  headers.each_with_index do |h, i|
+    rows[id][i] = body_params[h] if body_params.key?(h)
+  end
+  save_csv(params[:name], headers, rows)
+  content_type 'text/plain'
+  "Updated row ##{id}\n"
+end
+
+# DELETE — remove row by id
+delete '/:name/:id' do
+  headers, rows = load_csv(params[:name])
+  id = params[:id].to_i
+  halt 404, format_error("Row #{id} not found") unless rows[id]
+  rows.delete_at(id)
+  save_csv(params[:name], headers, rows)
+  content_type 'text/plain'
+  "Deleted row ##{id}\n"
+end
+
+# POST /:name/create — create new CSV with given headers
+post '/:name/create' do
+  path = csv_path(params[:name])
+  halt 409, format_error("'#{params[:name]}' already exists") if File.exist?(path)
+  body_params = parse_body
+  headers = body_params['headers']&.split(',')&.map(&:strip)
+  halt 400, format_error("Provide headers=col1,col2,...") unless headers&.any?
+  FileUtils.mkdir_p(CSV_DIR)
+  CSV.open(path, 'w') { |csv| csv << headers }
+  content_type 'text/plain'
+  "Created table '#{params[:name]}' with columns: #{headers.join(', ')}\n"
+end
+
+# ── body parser ────────────────────────────────────────────────────────────────
+def parse_body
+  ct = request.content_type || ''
+  if ct.include?('application/json')
+    JSON.parse(request.body.read) rescue {}
+  else
+    # form-encoded key=value&key2=value2
+    raw = request.body.read
+    URI.decode_www_form(raw).to_h
+  end
+end

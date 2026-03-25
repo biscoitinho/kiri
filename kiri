@@ -1,0 +1,265 @@
+#!/usr/bin/env ruby
+# kiri 霧 — terminal CSV manager
+
+require 'net/http'
+require 'uri'
+require 'json'
+
+begin; require 'tty-table'; HAS_TTY    = true; rescue LoadError; HAS_TTY    = false; end
+begin; require 'pastel';    HAS_PASTEL = true; rescue LoadError; HAS_PASTEL = false; end
+
+# ── config ─────────────────────────────────────────────────────────────────────
+
+HOST  = ENV.fetch('CSV_API_HOST', 'http://localhost:7777')
+COLOR = HAS_PASTEL && $stdout.tty?
+P     = COLOR ? Pastel.new : nil
+
+# ── output helpers ─────────────────────────────────────────────────────────────
+
+def c(text, *styles)
+  return text.to_s unless COLOR
+  P.decorate(text.to_s, *styles)
+end
+
+def ok(msg);   puts("#{c('✓', :green, :bold)} #{msg}"); end
+def err(msg);  warn("#{c('✗', :red,   :bold)} #{msg}"); exit 1; end
+def info(msg); puts("#{c('▸', :yellow, :bold)} #{c(msg, :bold)}"); end
+
+def render_table(headers, rows)
+  return puts(c('( empty )', :dim)) if rows.empty?
+
+  if HAS_TTY
+    idx_headers = [c('#', :cyan, :bold), *headers.map { |h| c(h, :cyan, :bold) }]
+    idx_rows    = rows.each_with_index.map { |r, i| [c(i, :dim), *r] }
+    puts TTY::Table.new(header: idx_headers, rows: idx_rows)
+              .render(:unicode, padding: [0, 1])
+  else
+    all    = [['#', *headers], *rows.each_with_index.map { |r, i| [i.to_s, *r] }]
+    widths = all.transpose.map { |col| col.map { |v| v.to_s.length }.max }
+    all.each_with_index do |row, i|
+      line = row.each_with_index.map { |v, j| v.to_s.ljust(widths[j]) }.join('  ')
+      puts i == 0 ? c(line, :bold) : line
+    end
+  end
+end
+
+# ── HTTP ───────────────────────────────────────────────────────────────────────
+
+def http_req(method, path, params = nil)
+  uri  = URI("#{HOST}#{path}")
+  http = Net::HTTP.new(uri.host, uri.port)
+  klass = { get: Net::HTTP::Get, post: Net::HTTP::Post,
+            put: Net::HTTP::Put, delete: Net::HTTP::Delete }[method]
+  req = klass.new(uri)
+  req['User-Agent'] = 'kiri-cli/2.0'
+  if params
+    req['Content-Type'] = 'application/x-www-form-urlencoded'
+    req.body = URI.encode_www_form(params)
+  end
+  res = http.request(req)
+  err res.body.strip if res.code.to_i >= 400
+  res.body
+rescue Errno::ECONNREFUSED
+  err "Cannot connect to #{HOST} — is the server running?"
+end
+
+def get_json(path)
+  uri = URI("#{HOST}#{path}")
+  req = Net::HTTP::Get.new(uri)
+  req['Accept']     = 'application/json'
+  req['User-Agent'] = 'kiri-cli/2.0'
+  JSON.parse(Net::HTTP.new(uri.host, uri.port).request(req).body)
+rescue Errno::ECONNREFUSED
+  err "Cannot connect to #{HOST} — is the server running?"
+rescue JSON::ParserError => e
+  err "Invalid JSON response: #{e.message}"
+end
+
+# ── data helpers ───────────────────────────────────────────────────────────────
+
+def strip_id(data)
+  return [[], []] if data.empty?
+  headers = data.first.keys.reject { |k| k == '_id' }
+  rows    = data.map { |r| r.values_at(*headers) }
+  [headers, rows]
+end
+
+def parse_pairs(pairs)
+  pairs.each_with_object({}) do |pair, h|
+    k, v = pair.split('=', 2)
+    err "Invalid pair '#{pair}' — use col=value format" unless k && v
+    h[k] = v
+  end
+end
+
+# ── commands ───────────────────────────────────────────────────────────────────
+
+def cmd_ls
+  data = get_json('/')
+  info "Tables on #{HOST}"
+  data.each { |t| puts "  #{c(t, :cyan)}" }
+end
+
+def cmd_show(table, json_mode)
+  data = get_json("/#{table}")
+  return puts(JSON.pretty_generate(data)) if json_mode
+  info table
+  render_table(*strip_id(data))
+end
+
+def cmd_get(table, id, json_mode)
+  data = get_json("/#{table}/#{id}")
+  return puts(JSON.pretty_generate(data)) if json_mode
+  info "#{table} / row #{id}"
+  render_table(*strip_id(data))
+end
+
+def cmd_add(table, pairs)
+  ok http_req(:post, "/#{table}", parse_pairs(pairs)).strip
+end
+
+def cmd_set(table, id, pairs)
+  ok http_req(:put, "/#{table}/#{id}", parse_pairs(pairs)).strip
+end
+
+def cmd_rm(table, id)
+  ok http_req(:delete, "/#{table}/#{id}").strip
+end
+
+def cmd_new(table, cols_str)
+  ok http_req(:post, "/#{table}/create", { 'headers' => cols_str }).strip
+end
+
+def cmd_cols(table)
+  data = get_json("/#{table}")
+  cols = data.first&.keys&.reject { |k| k == '_id' } || []
+  info "Columns in #{table}"
+  puts cols.map { |col| "  #{c(col, :cyan)}" }.join("\n")
+end
+
+def cmd_grep(table, col, val)
+  data = get_json("/#{table}")
+  err "Table '#{table}' is empty" if data.empty?
+  available = data.first.keys.reject { |k| k == '_id' }
+  err "Column '#{col}' not found. Available: #{available.join(', ')}" unless available.include?(col)
+  filtered = data.select { |r| r[col].to_s.downcase.include?(val.downcase) }
+  info "#{table} where #{col} ~ '#{val}'"
+  err "No matching rows." if filtered.empty?
+  render_table(*strip_id(filtered))
+end
+
+def cmd_chart(table, col, type)
+  err "youplot not installed — run: gem install youplot" unless system('which uplot > /dev/null 2>&1')
+  data = get_json("/#{table}")
+  err "Table '#{table}' is empty" if data.empty?
+  available = data.first.keys.reject { |k| k == '_id' }
+  err "Column '#{col}' not found. Available: #{available.join(', ')}" unless available.include?(col)
+
+  values  = data.map { |r| r[col] }
+  numeric = values.compact.all? { |v| v.to_s =~ /\A-?\d+(\.\d+)?\z/ }
+
+  if !numeric
+    # text column: always use count bar regardless of requested type
+    warn "#{c('!', :yellow, :bold)} '#{col}' is text — showing count bar" if type != 'bar'
+    info "#{table} / #{col} (count)"
+    counts = values.compact.tally
+    IO.popen(['uplot', 'bar', '-H', '-t', "#{table} — #{col} (count)"], 'w') do |io|
+      io.puts "#{col}\tcount"
+      counts.each { |v, n| io.puts "#{v}\t#{n}" }
+    end
+  else
+    info "#{table} / #{col} (#{type})"
+    IO.popen(['uplot', type, '-H', '-t', "#{table} — #{col}"], 'w') do |io|
+      io.puts col
+      values.each { |v| io.puts v }
+    end
+  end
+end
+
+# ── usage ──────────────────────────────────────────────────────────────────────
+
+USAGE = <<~USAGE
+  #{"\e[1;36m"}kiri 霧#{"\e[0m"} — terminal CSV manager
+
+  #{"\e[1m"}USAGE:#{"\e[0m"}
+    kiri ls                               list all tables
+    kiri show  <table>                    show all rows
+    kiri get   <table> <id>               show single row
+    kiri add   <table> col=val col=val…   add a row
+    kiri set   <table> <id> col=val …     update a row
+    kiri rm    <table> <id>               delete a row
+    kiri new   <table> col1,col2,col3     create new table
+    kiri cols  <table>                    list column names
+    kiri grep  <table> <col> <value>      filter rows by value
+    kiri chart <table> <col> [type]       plot a column (bar/line/hist/scatter)
+
+  #{"\e[1m"}OPTIONS:#{"\e[0m"}
+    --json          force JSON output
+    --no-color      disable colors
+    --host=<url>    override host (default: #{HOST})
+
+  #{"\e[1m"}EXAMPLES:#{"\e[0m"}
+    kiri new   animals name,species,age
+    kiri add   animals name=Simba species=lion age=5
+    kiri show  animals
+    kiri grep  animals species lion
+    kiri chart animals age bar
+    kiri show  animals --json
+
+  #{"\e[1m"}REMOTE:#{"\e[0m"}
+    CSV_API_HOST=http://192.168.1.50:7777 kiri show animals
+    export CSV_API_HOST=http://192.168.1.50:7777   # add to .zshrc
+USAGE
+
+# ── main ───────────────────────────────────────────────────────────────────────
+
+json_mode = ARGV.delete('--json')
+ARGV.delete('--no-color')
+ARGV.reject! { |a| a.start_with?('--host=') }
+
+cmd   = ARGV.shift
+table = ARGV.shift
+
+case cmd
+when 'ls', 'list'
+  cmd_ls
+when 'show'
+  err "Usage: kiri show <table>" unless table
+  cmd_show(table, json_mode)
+when 'get'
+  id = ARGV.shift
+  err "Usage: kiri get <table> <id>" unless table && id
+  cmd_get(table, id, json_mode)
+when 'add'
+  err "Usage: kiri add <table> col=val …" unless table && !ARGV.empty?
+  cmd_add(table, ARGV)
+when 'set', 'update'
+  id = ARGV.shift
+  err "Usage: kiri set <table> <id> col=val …" unless table && id && !ARGV.empty?
+  cmd_set(table, id, ARGV)
+when 'rm', 'delete'
+  id = ARGV.shift
+  err "Usage: kiri rm <table> <id>" unless table && id
+  cmd_rm(table, id)
+when 'new', 'create'
+  cols = ARGV.shift
+  err "Usage: kiri new <table> col1,col2,col3" unless table && cols
+  cmd_new(table, cols)
+when 'cols', 'columns'
+  err "Usage: kiri cols <table>" unless table
+  cmd_cols(table)
+when 'grep', 'filter', 'find'
+  col = ARGV.shift
+  val = ARGV.shift
+  err "Usage: kiri grep <table> <col> <value>" unless table && col && val
+  cmd_grep(table, col, val)
+when 'chart', 'plot'
+  col  = ARGV.shift
+  type = ARGV.shift || 'bar'
+  err "Usage: kiri chart <table> <col> [bar|line|hist|scatter]" unless table && col
+  cmd_chart(table, col, type)
+when nil, '--help', '-h'
+  puts USAGE
+else
+  err "Unknown command: #{cmd}"
+end
