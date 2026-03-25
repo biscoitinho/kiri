@@ -1,7 +1,0 @@
-RewriteEngine On
-
-# Przekieruj do router.php (dla Apache)
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^api/(.+)$ ../app/api/$1.php [L,QSA]
-RewriteRule ^(.+)$ $1.php [L,QSA]
