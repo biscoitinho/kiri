@@ -1,0 +1,581 @@
+# Rekomendacja architektury AI pamięci projektu
+## dla aplikacji PHP + Tabler.io
+## projekt: Armwrestling 84 kg
+
+## Cel
+
+Zbudować aplikację, która:
+
+- zapisuje pełną historię rozmów
+- nie gubi wiedzy projektowej po setkach wiadomości
+- nie wysyła całej historii do modelu przy każdym zapytaniu
+- utrzymuje niski koszt API
+- daje szybki dostęp do trwałych wniosków, stanu projektu i logów dziennych
+
+---
+
+## Główna zasada
+
+Chat nie może być jedyną pamięcią systemu.
+
+Chat ma być tylko logiem rozmowy.
+
+Prawdziwa pamięć projektu ma siedzieć w trzech warstwach:
+
+- raw messages
+- summary blocks
+- durable project memory
+
+Dzięki temu aplikacja zachowuje pełną historię, ale do modelu wysyła tylko najważniejszy kontekst.
+
+To podejście jest zgodne z kierunkiem OpenAI:
+- Responses API jako główne API do nowych integracji
+- conversation state
+- context management
+- compaction starszego kontekstu
+
+---
+
+## Rekomendowany model pamięci
+
+### Warstwa 1. Raw messages
+
+To jest pełny log rozmowy 1:1.
+
+Tabela:
+- messages
+
+Pola:
+- id
+- project_id
+- role
+- content
+- created_at
+- metadata_json
+
+Rola:
+- pełne archiwum
+- materiał do późniejszego streszczania
+- źródło prawdy historycznej
+
+Ważne:
+- niczego nie usuwamy
+- to jest warstwa archiwalna
+
+---
+
+### Warstwa 2. Summary blocks
+
+To są zwarte podsumowania fragmentów rozmowy.
+
+Tabela:
+- summary_blocks
+
+Pola:
+- id
+- project_id
+- message_from_id
+- message_to_id
+- summary
+- facts_json
+- state_updates_json
+- temporary_notes_json
+- created_at
+
+Rola:
+- kompresja historii
+- szybki dostęp do ważnych ustaleń z konkretnego okresu
+- ograniczenie tokenów wysyłanych do API
+
+Kiedy tworzyć summary block:
+- co 20 wiadomości
+lub
+- po przekroczeniu np. 15 000 do 20 000 znaków w aktywnej sesji
+lub
+- ręcznie przyciskiem "Streszcz ostatni blok"
+
+---
+
+### Warstwa 3. Durable project memory
+
+To jest trwała pamięć projektu.
+
+Tabela:
+- project_memory
+
+Pola:
+- id
+- project_id
+- category
+- content
+- priority
+- source_summary_block_id
+- updated_at
+
+Kategorie:
+- goal
+- nutrition
+- training
+- injury
+- recovery
+- psychology
+- competition
+- status
+
+Rola:
+- najważniejsze fakty, które mają być stale dokładane do kontekstu
+- rzeczy trwałe, a nie jednorazowe
+
+Przykłady:
+- użytkownik nie chce liczyć kalorii
+- celem jest stabilne 84 kg
+- problem techniczny: przegrywanie nadgarstka na starcie z toprollerami
+- sen silnie wpływa na migreny i głód
+- obecnie tylko gumy do MP z powodu przeciążenia nadgarstków
+
+---
+
+## Czwarta warstwa, opcjonalna ale bardzo wskazana
+
+### Project state
+
+To jest aktualny stan projektu w formie zwartej karty.
+
+Tabela:
+- project_state
+
+Pola:
+- project_id
+- start_weight_kg
+- current_weight_kg
+- target_weight_kg
+- current_phase
+- next_competition
+- training_mode
+- diet_mode
+- injury_status
+- updated_at
+
+Rola:
+- aktualny snapshot projektu
+- zawsze doklejany do promptu
+- łatwy do wyświetlenia w panelu bocznym
+
+Przykład:
+- start_weight_kg: 98.0
+- current_weight_kg: 95.1
+- target_weight_kg: 84.0
+- training_mode: tylko gumy do MP
+- injury_status: przeciążenie grzbietu nadgarstków
+
+---
+
+## Jak budować kontekst do kolejnego zapytania
+
+Przy każdym nowym pytaniu NIE wysyłaj całej historii rozmowy.
+
+Wysyłaj tylko:
+
+1. system prompt aplikacji
+2. project_state
+3. 10 do 20 najważniejszych rekordów z project_memory
+4. 2 do 5 najnowszych summary_blocks
+5. 8 do 12 ostatnich raw messages
+
+Taka kolejność jest zalecana:
+
+```text
+[SYSTEM PROMPT]
+Rola asystenta, styl odpowiedzi, zasady aplikacji
+
+[PROJECT STATE]
+Aktualna waga, faza projektu, aktualny stan zdrowia, cel
+
+[DURABLE MEMORY]
+Najważniejsze trwałe wnioski z projektu
+
+[RECENT SUMMARY BLOCKS]
+Streszczenia ostatnich bloków rozmowy
+
+[RECENT RAW MESSAGES]
+Kilka ostatnich wiadomości użytkownika i AI
+
+To daje:
+
+niski koszt
+
+dobrą pamięć długoterminową
+
+spójność odpowiedzi
+
+brak utraty kontekstu po długiej rozmowie
+
+Co zapisywać jako durable memory, a czego nie
+Zapisuj jako pamięć trwałą
+
+cele projektu
+
+sposób żywienia
+
+istotne obserwacje o głodzie, śnie i energii
+
+techniczne problemy treningowe
+
+urazy i przeciążenia
+
+status zawodów i kalendarz
+
+preferencje użytkownika
+
+Nie zapisuj jako pamięć trwałą
+
+pojedynczy jogurt zjedzony jednego dnia
+
+przypadkowy kawałek pizzy
+
+jednorazowy komentarz bez znaczenia długoterminowego
+
+zwykłe drobne logi dnia
+
+To powinno trafiać do:
+
+messages
+lub
+
+daily logs / checkpoints
+
+Dodatkowy podział na dane trwałe i dzienne
+daily_logs
+
+Tabela:
+
+daily_logs
+
+Pola:
+
+id
+
+project_id
+
+date
+
+meals_json
+
+hunger_notes
+
+sleep_hours
+
+training_notes
+
+pain_notes
+
+weight
+
+created_at
+
+Rola:
+
+dziennik
+
+dane do tygodniowych podsumowań
+
+materiał analityczny
+
+project_memory
+
+Rola:
+
+to, co ma być pamiętane przez miesiące
+
+To rozdzielenie jest krytyczne.
+
+Jak robić streszczanie bloków rozmowy
+
+Po zamknięciu bloku wiadomości uruchamiaj osobne zapytanie do modelu.
+
+Prompt do streszczenia:
+
+Streszcz poniższy blok rozmowy do pamięci projektowej.
+
+Wyciągnij:
+1. nowe fakty trwałe
+2. zmiany stanu projektu
+3. wnioski treningowe
+4. wnioski żywieniowe
+5. kwestie zdrowotne
+6. rzeczy chwilowe, których nie trzeba pamiętać długoterminowo
+
+Zwróć JSON:
+{
+  "summary": "...",
+  "long_term_facts": [],
+  "state_updates": [],
+  "temporary_notes": []
+}
+
+Po odpowiedzi:
+
+summary zapisujesz do summary_blocks
+
+long_term_facts mapujesz do project_memory
+
+state_updates mapujesz do project_state
+
+temporary_notes możesz zapisać do daily_logs albo pominąć
+
+Rekomendowane endpointy API
+Chat
+
+POST /api/chat/send
+
+GET /api/chat/history?project_id=1
+
+Import
+
+POST /api/messages/import
+
+POST /api/project/import-memory
+
+Summaries
+
+POST /api/summaries/generate
+
+GET /api/summaries/list?project_id=1
+
+Memory
+
+GET /api/memory/list?project_id=1
+
+POST /api/memory/upsert
+
+POST /api/memory/rebuild
+
+State
+
+GET /api/project-state/get?project_id=1
+
+POST /api/project-state/update
+
+Logs / checkpoints
+
+POST /api/checkpoints/add
+
+GET /api/checkpoints/list?project_id=1
+
+POST /api/daily-log/add
+
+Rekomendowany pipeline przy nowej wiadomości
+
+użytkownik wysyła wiadomość
+
+zapis do messages
+
+system pobiera:
+
+project_state
+
+durable memory
+
+recent summary blocks
+
+recent messages
+
+budowany jest prompt
+
+request do OpenAI Responses API
+
+odpowiedź zapisana do messages
+
+opcjonalnie uruchamiany extractor insightów
+
+jeśli blok osiągnął limit, generowany jest summary block
+
+Rekomendowany pipeline przy dłuższej rozmowie
+
+Jeśli liczba wiadomości rośnie:
+
+stare wiadomości zostają w messages
+
+starsze partie są streszczane do summary_blocks
+
+trwałe ustalenia idą do project_memory
+
+do kolejnych pytań nie wraca cały raw log
+
+To jest dokładnie mechanizm, który ma chronić przed:
+
+utratą jakości
+
+drogimi requestami
+
+chaosem kontekstowym
+
+Modele do różnych zadań
+Główny chat
+
+model mocniejszy
+
+Streszczanie bloków
+
+model tańszy
+
+Ekstrakcja JSON i insightów
+
+model tańszy
+
+Zasada:
+
+droższy model tylko tam, gdzie użytkownik czyta finalną odpowiedź
+
+tańszy model do zadań technicznych i zaplecza
+
+Widok UI w Tabler.io
+Główna kolumna
+
+chat
+
+Lewy panel
+
+projekty
+
+szybkie przełączanie projektów
+
+Prawy panel
+
+current project state
+
+durable memory
+
+last checkpoints
+
+injury status
+
+next competition
+
+Widok dodatkowy
+
+oś czasu projektu
+
+filtry po kategorii:
+
+dieta
+
+trening
+
+urazy
+
+sen
+
+waga
+
+Funkcje, które warto dodać od razu
+1. Przycisk "Podsumuj ostatni tydzień"
+
+Tworzy summary block z daily logs + messages
+
+2. Przycisk "Co już wiemy o projekcie"
+
+Pokazuje project_memory
+
+3. Przycisk "Odśwież stan projektu"
+
+Przelicza project_state na bazie ostatnich danych
+
+4. Przycisk "Import historii"
+
+Ładuje JSON z dawną rozmową
+
+5. Tagowanie wpisów
+
+Na przykład:
+
+weight
+
+sleep
+
+injury
+
+top-roll
+
+competition
+
+Rekomendacja wdrożenia krok po kroku
+Etap 1
+
+baza danych
+
+projects
+
+messages
+
+prosty chat
+
+zapis rozmów
+
+Etap 2
+
+import historii JSON
+
+widok historii
+
+Etap 3
+
+summary_blocks
+
+ręczne streszczanie bloków
+
+Etap 4
+
+project_memory
+
+panel pamięci trwałej
+
+Etap 5
+
+project_state
+
+panel aktualnego stanu
+
+Etap 6
+
+checkpoints i daily logs
+
+waga
+
+sen
+
+głód
+
+energia
+
+notatki
+
+Etap 7
+
+automatyczne budowanie promptu
+
+pełna AI memory architecture
+
+Najważniejsza rekomendacja końcowa
+
+Nie buduj tej aplikacji jako zwykłego "okna czatu".
+
+Zbuduj ją jako system z trzema pamięciami:
+
+historia
+
+streszczenia
+
+trwała wiedza projektowa
+
+To da:
+
+ciągłość rozmowy
+
+odporność na długie sesje
+
+niższy koszt API
+
+znacznie lepszą jakość odpowiedzi
+
+pełną kontrolę nad projektem Armwrestling 84 kg i kolejnymi projektami

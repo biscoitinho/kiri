@@ -1,0 +1,420 @@
+Konrad, poniżej masz cały plik MD, który możesz skopiować bezpośrednio do Claude Code.
+To jest gotowy dokument projektowy MVP Twojej aplikacji.
+
+Armwrestling Project Tracker + AI Coach
+Claude Code Implementation Plan
+Cel projektu
+
+Aplikacja webowa do:
+
+• zapisywania historii rozmów z AI
+• przechowywania wiedzy o projekcie treningowym
+• prowadzenia dziennika wagi, snu i treningu
+• automatycznego generowania wniosków z rozmów
+
+Główny projekt startowy:
+
+Armwrestling 84 kg
+
+Cel sportowy:
+
+Redukcja z 98 kg do 84 kg przy zachowaniu siły armwrestlerskiej.
+
+Stack technologiczny
+
+Backend
+
+• PHP 8+
+• SQLite (na start)
+• OpenAI API (Responses API)
+
+Frontend
+
+• Tabler.io PRO
+• HTML
+• CSS
+• Vanilla JS
+
+Hosting
+
+• zwykły hosting PHP
+• lub VPS
+
+Architektura aplikacji
+/app
+    /api
+        chat.php
+        insights.php
+        checkpoint.php
+
+    /services
+        OpenAIService.php
+        InsightExtractor.php
+        ContextBuilder.php
+
+    /models
+        Message.php
+        Project.php
+        Insight.php
+        Checkpoint.php
+
+/public
+    index.php
+    chat.php
+    project.php
+
+/storage
+    database.sqlite
+Struktura bazy danych
+projects
+id
+name
+description
+created_at
+
+Przykład:
+
+1 | Armwrestling 84 kg | redukcja do kategorii 84 kg
+messages
+id
+project_id
+role
+content
+created_at
+
+role:
+
+user
+assistant
+system
+insights
+
+Trwałe wnioski z rozmów.
+
+id
+project_id
+type
+content
+priority
+created_at
+
+types:
+
+diet
+training
+injury
+strategy
+psychology
+checkpoints
+
+Dziennik postępu.
+
+id
+project_id
+weight
+sleep_hours
+hunger_level
+energy_level
+notes
+created_at
+Widoki aplikacji
+Dashboard
+
+Tabler layout:
+
+Lewa kolumna
+
+Lista projektów
+
+Armwrestling 84 kg
+Inne projekty
+
+Środkowa kolumna
+
+Chat z AI.
+
+Prawa kolumna
+
+• aktualne wnioski
+• ostatnia waga
+• status projektu
+
+Widok projektu
+
+Sekcje:
+
+Chat
+
+Historia rozmowy.
+
+Insights
+
+Automatyczne wnioski.
+
+Progress
+
+Historia:
+
+• waga
+• sen
+• poziom głodu
+
+Flow rozmowy
+
+1 użytkownik wysyła wiadomość
+
+POST /api/chat
+
+2 backend:
+
+• zapisuje wiadomość do DB
+• buduje kontekst rozmowy
+
+3 kontekst wysyłany do OpenAI
+
+4 odpowiedź zapisywana w DB
+
+5 frontend odświeża chat
+
+Budowanie kontekstu
+
+ContextBuilder.php
+
+Budujemy prompt z:
+
+1 ostatnich wiadomości
+
+last 20 messages
+
+2 podsumowania projektu
+
+3 najważniejszych insights
+
+Przykład kontekstu
+PROJECT:
+Armwrestling 84 kg
+
+GOAL:
+reduce weight from 98 kg to 84 kg
+
+CURRENT WEIGHT:
+~95 kg
+
+IMPORTANT NOTES:
+
+- user is armwrestling athlete
+- prefers no calorie counting
+- eats functional meals
+- goal competition March
+Integracja OpenAI
+
+Service:
+
+OpenAIService.php
+
+Wywołanie:
+
+POST https://api.openai.com/v1/responses
+
+Payload:
+
+{
+ "model": "gpt-5",
+ "input": context + user_message
+}
+Automatyczna ekstrakcja wniosków
+
+InsightExtractor analizuje odpowiedzi AI.
+
+Jeśli pojawi się informacja typu:
+
+waga spadła z 98 do 95
+
+system zapisuje insight:
+
+type: progress
+content: weight dropped from 98 to 95
+Widok Checkpoint
+
+Formularz:
+
+waga
+sen
+głód
+energia
+notatka
+
+Zapisywany jako wpis dziennika.
+
+Funkcje MVP
+
+Chat z historią
+
+Insights
+
+Checkpoint tracker
+
+Projekt manager
+
+Funkcje v2
+
+Automatyczne tygodniowe podsumowania
+
+AI weekly summary
+
+Trend wagi
+
+chart.js
+
+Alerty regeneracyjne
+
+high fatigue detection
+Przykładowy UI
+
+Tabler layout:
+
+-------------------------------------
+| Projects | Chat | Insights       |
+-------------------------------------
+|          |      |                |
+|          |      |                |
+|          |      |                |
+-------------------------------------
+Import historii projektu
+
+Plan importu.
+
+Format JSON.
+
+{
+ "project": "Armwrestling 84 kg",
+ "messages": [
+   {
+     "role": "user",
+     "content": "...",
+     "date": ""
+   }
+ ]
+}
+Backup
+
+Codzienny backup:
+
+database.sqlite
+Security
+
+Minimalny poziom:
+
+• auth login
+• rate limit
+• sanitization
+
+Roadmapa
+Etap 1
+
+DB
+Chat
+OpenAI integration
+
+Etap 2
+
+Insights
+
+Etap 3
+
+Progress tracker
+
+Etap 4
+
+AI summaries
+
+Docelowy efekt
+
+System pamięta:
+
+• historię rozmów
+• wnioski
+• parametry treningowe
+
+i staje się:
+
+osobistym AI trenerem proojektu, wspierajacym gubienie wagi i wzrost silyu armwrestlerskiej
+
+
+masz tu tez jsona z mojej rozmowy z chatgpt przez webowy interface  z najwazniejszymi wnisokami ktore od razu nalezy zawrzec w pamieci:
+
+{
+  "project": {
+    "slug": "armwrestling-84kg",
+    "name": "Armwrestling 84 kg",
+    "description": "Redukcja masy ciała z 98 kg do 84 kg przy zachowaniu siły armwrestlerskiej",
+    "status": "active"
+  },
+  "project_state": {
+    "start_weight_kg": 98.0,
+    "current_weight_kg": 95.1,
+    "target_weight_kg": 84.0,
+    "competition_near_term": "Mistrzostwa Polski 27-29 marca",
+    "competition_long_term": "Docelowy start za rok w kategorii 84 kg",
+    "training_mode_now": "Tylko gumy do MP z powodu przeciążenia ścięgien i nadgarstków",
+    "diet_mode_now": "Bez liczenia kalorii, jedzenie funkcyjne, bez słodyczy i napojów kolorowych",
+    "main_risks": [
+      "zbyt niski sen",
+      "stały głód przy zbyt niskiej podaży energii",
+      "przeciążenie nadgarstków i ścięgien"
+    ]
+  },
+  "insights": [
+    {
+      "type": "goal",
+      "priority": 10,
+      "content": "Cel główny: stabilne 84 kg z wyprzedzeniem przed zawodami, aby trenować kilka miesięcy już jako zawodnik 84 kg."
+    },
+    {
+      "type": "competition",
+      "priority": 9,
+      "content": "Najbliższe MP są traktowane jako obowiązek i test formy, bez dużej presji wyniku."
+    },
+    {
+      "type": "nutrition",
+      "priority": 9,
+      "content": "Użytkownik nie chce liczyć kalorii. Lepiej działa prosty model jedzenia funkcyjnego niż ścisłe liczenie."
+    },
+    {
+      "type": "nutrition",
+      "priority": 8,
+      "content": "Zbyt mała ilość węgli przez kilka dni powoduje silny głód i nieprzyjemny zapach z ust."
+    },
+    {
+      "type": "training",
+      "priority": 9,
+      "content": "Największym problemem technicznym jest przegrywanie nadgarstka na starcie z toprollerami."
+    },
+    {
+      "type": "training",
+      "priority": 8,
+      "content": "Problem nie wynika głównie z chwytu palców, tylko z prostowania nadgarstka i utraty linii siły."
+    },
+    {
+      "type": "training",
+      "priority": 8,
+      "content": "Obecnie zawodnik jest bardziej reaktywny na starcie niż ofensywny."
+    },
+    {
+      "type": "injury",
+      "priority": 10,
+      "content": "Po ostatnich zawodach mocno bolą nadgarstki, szczególnie od grzbietu. To wygląda na przeciążenie."
+    },
+    {
+      "type": "recovery",
+      "priority": 9,
+      "content": "Sen bardzo mocno wpływa na głód, migreny, energię i kontrolę jedzenia."
+    },
+    {
+      "type": "psychology",
+      "priority": 8,
+      "content": "Użytkownik wierzy w proces, nie działa z lęku, chce po prostu lżej żyć i odzyskać dawną sportową wersję siebie."
+    }
+  ],
+  "messages": []
+} jesli masz pytania zadaj je przed wdrozeniem, front opieramy o tabler.io pro skoro juz go mamy ;) [dodalem do resources]
