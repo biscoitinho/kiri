@@ -1,0 +1,32 @@
+AllCops:
+  NewCops: enable
+  TargetRubyVersion: 3.3
+  Exclude:
+    - 'spec/spec_helper.rb'
+
+# Scripts don't benefit from frozen string literals
+Style/FrozenStringLiteralComment:
+  Enabled: false
+
+# Scripts that are chmod +x are fine
+Lint/ScriptPermission:
+  Enabled: false
+
+# The cmd_* dispatch methods are intentionally large — this is the CLI pattern
+Metrics/MethodLength:
+  Max: 100
+Metrics/AbcSize:
+  Max: 120
+Metrics/CyclomaticComplexity:
+  Max: 35
+Metrics/PerceivedComplexity:
+  Max: 30
+Metrics/BlockLength:
+  Max: 100
+
+# Line length: allow longer lines in heredoc strings / error messages
+Layout/LineLength:
+  Max: 120
+  AllowedPatterns:
+    - '^\s*(err|puts|warn|ok|info)\s+'
+    - 'USAGE'

@@ -1,9 +1,9 @@
 # ── diet module ────────────────────────────────────────────────────────────────
 
-MEALS_TABLE = 'meals'
-GOALS_TABLE = 'diet_goals'
-MEALS_COLS  = 'date,food,kcal,protein_g,carbs_g,fat_g'
-GOALS_COLS  = 'kcal,protein_g,carbs_g,fat_g'
+MEALS_TABLE = 'meals'.freeze
+GOALS_TABLE = 'diet_goals'.freeze
+MEALS_COLS  = 'date,food,kcal,protein_g,carbs_g,fat_g'.freeze
+GOALS_COLS  = 'kcal,protein_g,carbs_g,fat_g'.freeze
 MACROS      = %w[kcal protein_g carbs_g fat_g].freeze
 
 def diet_ensure_tables
@@ -22,16 +22,21 @@ def diet_today_meals
 end
 
 def diet_sum(meals)
-  MACROS.each_with_object({}) do |col, h|
-    h[col] = meals.sum { |r| r[col].to_f }.round(1)
+  MACROS.to_h do |col|
+    [col, meals.sum { |r| r[col].to_f }.round(1)]
   end
 end
 
 def diet_bar(current, goal, width = 20)
-  return '' unless goal && goal.to_f > 0
-  pct    = [current.to_f / goal.to_f, 1.0].min
+  return '' unless goal&.to_f&.positive?
+
+  pct    = [current.to_f / goal, 1.0].min
   filled = (pct * width).round
-  bar    = c('█' * filled, pct < 0.85 ? :green : pct < 1.0 ? :yellow : :red)
+  bar    = c('█' * filled, if pct < 0.85
+                             :green
+                           else
+                             pct < 1.0 ? :yellow : :red
+                           end)
   "#{bar}#{c('░' * (width - filled), :dim)} #{(pct * 100).round}%"
 end
 
@@ -45,7 +50,7 @@ def cmd_diet(subcmd, args)
 
   when 'log'
     food = args.shift
-    err "Usage: kiri diet log <food> kcal=X protein_g=X carbs_g=X fat_g=X" unless food
+    err 'Usage: kiri diet log <food> kcal=X protein_g=X carbs_g=X fat_g=X' unless food
     pairs         = parse_pairs(args)
     pairs['date'] = Time.now.strftime('%Y-%m-%d')
     pairs['food'] = food
@@ -78,7 +83,7 @@ def cmd_diet(subcmd, args)
     sub2 = args.shift
     case sub2
     when 'set'
-      err "Usage: kiri diet goal set kcal=X protein_g=X carbs_g=X fat_g=X" if args.empty?
+      err 'Usage: kiri diet goal set kcal=X protein_g=X carbs_g=X fat_g=X' if args.empty?
       pairs = parse_pairs(args)
       data  = get_json("/#{GOALS_TABLE}")
       if data.empty?
@@ -88,21 +93,21 @@ def cmd_diet(subcmd, args)
       end
     when 'show', nil
       goals = diet_get_goals
-      err "No goals set — run: kiri diet goal set kcal=2000 protein_g=150 carbs_g=200 fat_g=70" unless goals
+      err 'No goals set — run: kiri diet goal set kcal=2000 protein_g=150 carbs_g=200 fat_g=70' unless goals
       info 'daily goals'
       MACROS.each { |col| puts "  #{c(col.ljust(10), :cyan)}  #{goals[col]}" }
     else
-      err "Usage: kiri diet goal [set|show]"
+      err 'Usage: kiri diet goal [set|show]'
     end
 
   when 'chart'
-    err "youplot not installed — run: gem install youplot" unless system('which uplot > /dev/null 2>&1')
+    err 'youplot not installed — run: gem install youplot' unless system('which uplot > /dev/null 2>&1')
     macro = args.shift || 'kcal'
     days  = (args.shift || '7').to_i
     err "Unknown macro '#{macro}'. Use: #{MACROS.join(', ')}" unless MACROS.include?(macro)
 
     data = get_json("/#{MEALS_TABLE}")
-    err "No meals logged yet" if data.empty?
+    err 'No meals logged yet' if data.empty?
 
     by_date = data.group_by { |r| r['date'] }
     dates   = by_date.keys.sort.last(days)

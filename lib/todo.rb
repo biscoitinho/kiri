@@ -1,7 +1,7 @@
 # ── todo module ────────────────────────────────────────────────────────────────
 
-TODOS_TABLE = 'todos'
-TODOS_COLS  = 'id,title,status,created_at,done_at,notes'
+TODOS_TABLE = 'todos'.freeze
+TODOS_COLS  = 'id,title,status,created_at,done_at,notes'.freeze
 
 def todo_ensure_tables
   tables = get_json('/')
@@ -27,6 +27,7 @@ end
 
 def todo_render(rows)
   return puts(c('  ( no tasks )', :dim)) if rows.empty?
+
   cols = %w[id title status created_at done_at notes]
   colored_rows = rows.map do |r|
     [r['id'], r['title'], todo_status_color(r['status']),
@@ -48,20 +49,20 @@ def cmd_todo(subcmd, args)
 
   when 'add'
     title = args.shift
-    err "Usage: kiri todo add <title> [notes=...]" unless title
+    err 'Usage: kiri todo add <title> [notes=...]' unless title
     pairs = parse_pairs(args)
     data  = get_json("/#{TODOS_TABLE}")
     new_id = data.empty? ? 0 : data.map { |r| r['id'].to_i }.max + 1
     row = {
-      'id'         => new_id.to_s,
-      'title'      => title,
-      'status'     => 'open',
+      'id' => new_id.to_s,
+      'title' => title,
+      'status' => 'open',
       'created_at' => Time.now.strftime('%Y-%m-%d'),
-      'done_at'    => '',
-      'notes'      => pairs['notes'] || ''
+      'done_at' => '',
+      'notes' => pairs['notes'] || ''
     }
     ok http_req(:post, "/#{TODOS_TABLE}", row).strip
-    puts "  #{c('#' + new_id.to_s, :cyan, :bold)}  #{title}"
+    puts "  #{c("##{new_id}", :cyan, :bold)}  #{title}"
 
   when 'ls', 'list'
     data = get_json("/#{TODOS_TABLE}")
@@ -82,19 +83,19 @@ def cmd_todo(subcmd, args)
 
   when 'show'
     id_val = args.shift
-    err "Usage: kiri todo show <id>" unless id_val
+    err 'Usage: kiri todo show <id>' unless id_val
     row = todo_find(id_val)
     info "task ##{row['id']}"
-    row.reject { |k, _| k == '_id' }.each do |k, v|
+    row.except('_id').each do |k, v|
       puts "  #{c(k.ljust(12), :cyan)}  #{v}"
     end
 
   when 'done'
     id_val = args.shift
-    err "Usage: kiri todo done <id>" unless id_val
+    err 'Usage: kiri todo done <id>' unless id_val
     row = todo_find(id_val)
     if row['status'] == 'done'
-      info "Already done"
+      info 'Already done'
     else
       http_req(:put, "/#{TODOS_TABLE}/#{row['_id']}", 'status' => 'done', 'done_at' => Time.now.strftime('%Y-%m-%d'))
       ok "Task ##{row['id']} marked done: #{row['title']}"
@@ -102,25 +103,26 @@ def cmd_todo(subcmd, args)
 
   when 'cancel'
     id_val = args.shift
-    err "Usage: kiri todo cancel <id>" unless id_val
+    err 'Usage: kiri todo cancel <id>' unless id_val
     row = todo_find(id_val)
     if row['status'] == 'cancelled'
-      info "Already cancelled"
+      info 'Already cancelled'
     else
-      http_req(:put, "/#{TODOS_TABLE}/#{row['_id']}", 'status' => 'cancelled', 'done_at' => Time.now.strftime('%Y-%m-%d'))
+      http_req(:put, "/#{TODOS_TABLE}/#{row['_id']}", 'status' => 'cancelled',
+                                                      'done_at' => Time.now.strftime('%Y-%m-%d'))
       ok "Task ##{row['id']} cancelled: #{row['title']}"
     end
 
   when 'rm', 'delete'
     id_val = args.shift
-    err "Usage: kiri todo rm <id>" unless id_val
+    err 'Usage: kiri todo rm <id>' unless id_val
     row = todo_find(id_val)
     http_req(:delete, "/#{TODOS_TABLE}/#{row['_id']}")
     ok "Deleted task ##{row['id']}: #{row['title']}"
 
   when 'edit'
     id_val = args.shift
-    err "Usage: kiri todo edit <id> title=... notes=..." unless id_val && !args.empty?
+    err 'Usage: kiri todo edit <id> title=... notes=...' unless id_val && !args.empty?
     row   = todo_find(id_val)
     pairs = parse_pairs(args)
     http_req(:put, "/#{TODOS_TABLE}/#{row['_id']}", pairs)
