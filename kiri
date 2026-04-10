@@ -5,8 +5,23 @@ require 'net/http'
 require 'uri'
 require 'json'
 
-begin; require 'tty-table'; HAS_TTY    = true; rescue LoadError; HAS_TTY    = false; end
-begin; require 'pastel';    HAS_PASTEL = true; rescue LoadError; HAS_PASTEL = false; end
+begin
+  require 'tty-table'
+  HAS_TTY = true
+rescue LoadError
+  HAS_TTY = false
+end
+begin
+  require 'pastel'
+  HAS_PASTEL = true
+rescue LoadError
+  HAS_PASTEL = false
+end
+
+KIRI_HOME = __dir__
+require File.join(KIRI_HOME, 'lib', 'diet')
+require File.join(KIRI_HOME, 'lib', 'todo')
+require File.join(KIRI_HOME, 'lib', 'training')
 
 # ── config ─────────────────────────────────────────────────────────────────────
 
@@ -18,12 +33,18 @@ P     = COLOR ? Pastel.new : nil
 
 def c(text, *styles)
   return text.to_s unless COLOR
+
   P.decorate(text.to_s, *styles)
 end
 
-def ok(msg);   puts("#{c('✓', :green, :bold)} #{msg}"); end
-def err(msg);  warn("#{c('✗', :red,   :bold)} #{msg}"); exit 1; end
-def info(msg); puts("#{c('▸', :yellow, :bold)} #{c(msg, :bold)}"); end
+def ok(msg) = puts("#{c('✓', :green, :bold)} #{msg}")
+
+def err(msg)
+  warn("#{c('✗', :red, :bold)} #{msg}")
+  exit 1
+end
+
+def info(msg) = puts("#{c('▸', :yellow, :bold)} #{c(msg, :bold)}")
 
 def render_table(headers, rows)
   return puts(c('( empty )', :dim)) if rows.empty?
@@ -32,13 +53,13 @@ def render_table(headers, rows)
     idx_headers = [c('#', :cyan, :bold), *headers.map { |h| c(h, :cyan, :bold) }]
     idx_rows    = rows.each_with_index.map { |r, i| [c(i, :dim), *r] }
     puts TTY::Table.new(header: idx_headers, rows: idx_rows)
-              .render(:unicode, padding: [0, 1])
+                   .render(:unicode, padding: [0, 1])
   else
     all    = [['#', *headers], *rows.each_with_index.map { |r, i| [i.to_s, *r] }]
     widths = all.transpose.map { |col| col.map { |v| v.to_s.length }.max }
     all.each_with_index do |row, i|
       line = row.each_with_index.map { |v, j| v.to_s.ljust(widths[j]) }.join('  ')
-      puts i == 0 ? c(line, :bold) : line
+      puts i.zero? ? c(line, :bold) : line
     end
   end
 end
@@ -79,6 +100,7 @@ end
 
 def strip_id(data)
   return [[], []] if data.empty?
+
   headers = data.first.keys.reject { |k| k == '_id' }
   rows    = data.map { |r| r.values_at(*headers) }
   [headers, rows]
@@ -103,6 +125,7 @@ end
 def cmd_show(table, json_mode)
   data = get_json("/#{table}")
   return puts(JSON.pretty_generate(data)) if json_mode
+
   info table
   render_table(*strip_id(data))
 end
@@ -110,6 +133,7 @@ end
 def cmd_get(table, id, json_mode)
   data = get_json("/#{table}/#{id}")
   return puts(JSON.pretty_generate(data)) if json_mode
+
   info "#{table} / row #{id}"
   render_table(*strip_id(data))
 end
@@ -144,144 +168,12 @@ def cmd_grep(table, col, val)
   err "Column '#{col}' not found. Available: #{available.join(', ')}" unless available.include?(col)
   filtered = data.select { |r| r[col].to_s.downcase.include?(val.downcase) }
   info "#{table} where #{col} ~ '#{val}'"
-  err "No matching rows." if filtered.empty?
+  err 'No matching rows.' if filtered.empty?
   render_table(*strip_id(filtered))
 end
 
-# ── diet commands ──────────────────────────────────────────────────────────────
-
-MEALS_TABLE = 'meals'
-GOALS_TABLE = 'diet_goals'
-MEALS_COLS  = 'date,food,kcal,protein_g,carbs_g,fat_g'
-GOALS_COLS  = 'kcal,protein_g,carbs_g,fat_g'
-MACROS      = %w[kcal protein_g carbs_g fat_g].freeze
-
-def diet_ensure_tables
-  tables = get_json('/')
-  http_req(:post, "/#{MEALS_TABLE}/create", { 'headers' => MEALS_COLS }) unless tables.include?(MEALS_TABLE)
-  http_req(:post, "/#{GOALS_TABLE}/create", { 'headers' => GOALS_COLS }) unless tables.include?(GOALS_TABLE)
-end
-
-def diet_get_goals
-  get_json("/#{GOALS_TABLE}").first
-end
-
-def diet_today_meals
-  today = Time.now.strftime('%Y-%m-%d')
-  get_json("/#{MEALS_TABLE}").select { |r| r['date'] == today }
-end
-
-def diet_sum(meals)
-  MACROS.each_with_object({}) do |col, h|
-    h[col] = meals.sum { |r| r[col].to_f }.round(1)
-  end
-end
-
-def diet_bar(current, goal, width = 20)
-  return '' unless goal && goal.to_f > 0
-  pct    = [current.to_f / goal.to_f, 1.0].min
-  filled = (pct * width).round
-  bar    = c('█' * filled, pct < 0.85 ? :green : pct < 1.0 ? :yellow : :red)
-  "#{bar}#{c('░' * (width - filled), :dim)} #{(pct * 100).round}%"
-end
-
-def cmd_diet(subcmd, args)
-  diet_ensure_tables
-
-  case subcmd
-
-  when 'init'
-    ok "Diet tables ready: #{MEALS_TABLE}, #{GOALS_TABLE}"
-
-  when 'log'
-    food = args.shift
-    err "Usage: kiri diet log <food> kcal=X protein_g=X carbs_g=X fat_g=X" unless food
-    pairs         = parse_pairs(args)
-    pairs['date'] = Time.now.strftime('%Y-%m-%d')
-    pairs['food'] = food
-    ok http_req(:post, "/#{MEALS_TABLE}", pairs).strip
-
-  when 'today'
-    today  = Time.now.strftime('%Y-%m-%d')
-    meals  = diet_today_meals
-    totals = diet_sum(meals)
-    goals  = diet_get_goals
-
-    info "#{today} — meals"
-    if meals.empty?
-      puts c('  ( no meals logged today )', :dim)
-    else
-      cols = %w[food kcal protein_g carbs_g fat_g]
-      render_table(cols, meals.map { |m| m.values_at(*cols) })
-    end
-
-    puts
-    info 'daily totals'
-    MACROS.each do |col|
-      cur      = totals[col]
-      goal     = goals ? goals[col].to_f : nil
-      goal_str = goal ? "/ #{goal}" : '/ --'
-      puts "  #{c(col.ljust(10), :cyan)}  #{cur.to_s.rjust(7)} #{goal_str.ljust(10)}  #{diet_bar(cur, goal)}"
-    end
-
-  when 'goal'
-    sub2 = args.shift
-    case sub2
-    when 'set'
-      err "Usage: kiri diet goal set kcal=X protein_g=X carbs_g=X fat_g=X" if args.empty?
-      pairs = parse_pairs(args)
-      data  = get_json("/#{GOALS_TABLE}")
-      if data.empty?
-        ok http_req(:post, "/#{GOALS_TABLE}", pairs).strip
-      else
-        ok http_req(:put, "/#{GOALS_TABLE}/0", pairs).strip
-      end
-    when 'show', nil
-      goals = diet_get_goals
-      err "No goals set — run: kiri diet goal set kcal=2000 protein_g=150 carbs_g=200 fat_g=70" unless goals
-      info 'daily goals'
-      MACROS.each { |col| puts "  #{c(col.ljust(10), :cyan)}  #{goals[col]}" }
-    else
-      err "Usage: kiri diet goal [set|show]"
-    end
-
-  when 'chart'
-    err "youplot not installed — run: gem install youplot" unless system('which uplot > /dev/null 2>&1')
-    macro = args.shift || 'kcal'
-    days  = (args.shift || '7').to_i
-    err "Unknown macro '#{macro}'. Use: #{MACROS.join(', ')}" unless MACROS.include?(macro)
-
-    data = get_json("/#{MEALS_TABLE}")
-    err "No meals logged yet" if data.empty?
-
-    by_date = data.group_by { |r| r['date'] }
-    dates   = by_date.keys.sort.last(days)
-    points  = dates.map { |d| [d, by_date[d].sum { |r| r[macro].to_f }.round(1)] }
-
-    info "#{macro} — last #{days} days"
-    IO.popen(['uplot', 'bar', '-H', '-t', "#{macro} / day"], 'w') do |io|
-      io.puts "date\t#{macro}"
-      points.each { |d, v| io.puts "#{d}\t#{v}" }
-    end
-
-  else
-    puts <<~USAGE
-      #{c('kiri diet', :cyan, :bold)} — dietary tracker
-
-        kiri diet init                              create meals & goals tables
-        kiri diet log <food> kcal=X protein_g=X …  log a meal (today's date auto-set)
-        kiri diet today                             show today's meals + totals vs goals
-        kiri diet goal set kcal=X protein_g=X …    set daily macro goals
-        kiri diet goal show                         show current goals
-        kiri diet chart [macro] [days]              bar chart (default: kcal, 7 days)
-
-      Macros: #{MACROS.join(', ')}
-    USAGE
-  end
-end
-
 def cmd_chart(table, col, type)
-  err "youplot not installed — run: gem install youplot" unless system('which uplot > /dev/null 2>&1')
+  err 'youplot not installed — run: gem install youplot' unless system('which uplot > /dev/null 2>&1')
   data = get_json("/#{table}")
   err "Table '#{table}' is empty" if data.empty?
   available = data.first.keys.reject { |k| k == '_id' }
@@ -290,7 +182,13 @@ def cmd_chart(table, col, type)
   values  = data.map { |r| r[col] }
   numeric = values.compact.all? { |v| v.to_s =~ /\A-?\d+(\.\d+)?\z/ }
 
-  if !numeric
+  if numeric
+    info "#{table} / #{col} (#{type})"
+    IO.popen(['uplot', type, '-H', '-t', "#{table} — #{col}"], 'w') do |io|
+      io.puts col
+      values.each { |v| io.puts v }
+    end
+  else
     # text column: always use count bar regardless of requested type
     warn "#{c('!', :yellow, :bold)} '#{col}' is text — showing count bar" if type != 'bar'
     info "#{table} / #{col} (count)"
@@ -299,21 +197,15 @@ def cmd_chart(table, col, type)
       io.puts "#{col}\tcount"
       counts.each { |v, n| io.puts "#{v}\t#{n}" }
     end
-  else
-    info "#{table} / #{col} (#{type})"
-    IO.popen(['uplot', type, '-H', '-t', "#{table} — #{col}"], 'w') do |io|
-      io.puts col
-      values.each { |v| io.puts v }
-    end
   end
 end
 
 # ── usage ──────────────────────────────────────────────────────────────────────
 
-USAGE = <<~USAGE
-  #{"\e[1;36m"}kiri 霧#{"\e[0m"} — terminal CSV manager
+USAGE = <<~USAGE.freeze
+  [1;36mkiri 霧[0m — terminal CSV manager
 
-  #{"\e[1m"}USAGE:#{"\e[0m"}
+  [1mUSAGE:[0m
     kiri ls                               list all tables
     kiri show  <table>                    show all rows
     kiri get   <table> <id>               show single row
@@ -324,14 +216,16 @@ USAGE = <<~USAGE
     kiri cols  <table>                    list column names
     kiri grep  <table> <col> <value>      filter rows by value
     kiri chart <table> <col> [type]       plot a column (bar/line/hist/scatter)
-    kiri diet  <subcmd>                   dietary tracker (log/today/goal/chart)
+    kiri diet     <subcmd>                 dietary tracker (log/today/goal/chart)
+    kiri todo     <subcmd>                 task tracker (add/ls/done/cancel/rm)
+    kiri training <subcmd>                 training log (log/today/last/pr/summary/chart)
 
-  #{"\e[1m"}OPTIONS:#{"\e[0m"}
+  [1mOPTIONS:[0m
     --json          force JSON output
     --no-color      disable colors
     --host=<url>    override host (default: #{HOST})
 
-  #{"\e[1m"}EXAMPLES:#{"\e[0m"}
+  [1mEXAMPLES:[0m
     kiri new   animals name,species,age
     kiri add   animals name=Simba species=lion age=5
     kiri show  animals
@@ -339,14 +233,30 @@ USAGE = <<~USAGE
     kiri chart animals age bar
     kiri show  animals --json
 
-  #{"\e[1m"}DIET:#{"\e[0m"}
+  [1mDIET:[0m
     kiri diet init
     kiri diet goal set kcal=2200 protein_g=150 carbs_g=250 fat_g=70
     kiri diet log "kurczak z ryżem" kcal=650 protein_g=45 carbs_g=80 fat_g=12
     kiri diet today
     kiri diet chart kcal 14
 
-  #{"\e[1m"}REMOTE:#{"\e[0m"}
+  [1mTODO:[0m
+    kiri todo init
+    kiri todo add "write tests" notes="see issue #3"
+    kiri todo ls
+    kiri todo done 0
+    kiri todo log
+
+  [1mTRAINING:[0m
+    kiri training init
+    kiri training log exercise=squat sets=5 reps=5 weight_kg=100
+    kiri training today
+    kiri training last squat
+    kiri training pr squat weight_kg
+    kiri training summary 30
+    kiri training chart squat weight_kg 30
+
+  [1mREMOTE:[0m
     CSV_API_HOST=http://192.168.1.50:7777 kiri show animals
     export CSV_API_HOST=http://192.168.1.50:7777   # add to .zshrc
 USAGE
@@ -364,42 +274,46 @@ case cmd
 when 'ls', 'list'
   cmd_ls
 when 'show'
-  err "Usage: kiri show <table>" unless table
+  err 'Usage: kiri show <table>' unless table
   cmd_show(table, json_mode)
 when 'get'
   id = ARGV.shift
-  err "Usage: kiri get <table> <id>" unless table && id
+  err 'Usage: kiri get <table> <id>' unless table && id
   cmd_get(table, id, json_mode)
 when 'add'
-  err "Usage: kiri add <table> col=val …" unless table && !ARGV.empty?
+  err 'Usage: kiri add <table> col=val …' unless table && !ARGV.empty?
   cmd_add(table, ARGV)
 when 'set', 'update'
   id = ARGV.shift
-  err "Usage: kiri set <table> <id> col=val …" unless table && id && !ARGV.empty?
+  err 'Usage: kiri set <table> <id> col=val …' unless table && id && !ARGV.empty?
   cmd_set(table, id, ARGV)
 when 'rm', 'delete'
   id = ARGV.shift
-  err "Usage: kiri rm <table> <id>" unless table && id
+  err 'Usage: kiri rm <table> <id>' unless table && id
   cmd_rm(table, id)
 when 'new', 'create'
   cols = ARGV.shift
-  err "Usage: kiri new <table> col1,col2,col3" unless table && cols
+  err 'Usage: kiri new <table> col1,col2,col3' unless table && cols
   cmd_new(table, cols)
 when 'cols', 'columns'
-  err "Usage: kiri cols <table>" unless table
+  err 'Usage: kiri cols <table>' unless table
   cmd_cols(table)
 when 'grep', 'filter', 'find'
   col = ARGV.shift
   val = ARGV.shift
-  err "Usage: kiri grep <table> <col> <value>" unless table && col && val
+  err 'Usage: kiri grep <table> <col> <value>' unless table && col && val
   cmd_grep(table, col, val)
 when 'chart', 'plot'
   col  = ARGV.shift
   type = ARGV.shift || 'bar'
-  err "Usage: kiri chart <table> <col> [bar|line|hist|scatter]" unless table && col
+  err 'Usage: kiri chart <table> <col> [bar|line|hist|scatter]' unless table && col
   cmd_chart(table, col, type)
 when 'diet'
   cmd_diet(table, ARGV)
+when 'todo'
+  cmd_todo(table, ARGV)
+when 'training'
+  cmd_training(table, ARGV)
 when nil, '--help', '-h'
   puts USAGE
 else

@@ -13,7 +13,8 @@ CSV_DIR = File.expand_path(ENV['CSV_DIR'] || './data')
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 def csv_path(name)
-  raise "Invalid name" unless name =~ /\A[\w\-]+\z/
+  raise 'Invalid name' unless name =~ /\A[\w-]+\z/
+
   File.join(CSV_DIR, "#{name}.csv")
 end
 
@@ -34,22 +35,23 @@ end
 def wants_json?
   accept = request.env['HTTP_ACCEPT'] || ''
   agent  = request.env['HTTP_USER_AGENT'] || ''
-  accept.include?('application/json') || accept.include?('*/*') && !agent.start_with?('curl')
+  accept.include?('application/json') || (accept.include?('*/*') && !agent.start_with?('curl'))
 end
 
 def format_table(headers, rows)
   return "( empty )\n" if rows.empty?
+
   # add # column
   indexed = rows.each_with_index.map { |r, i| [i, *r] }
   table = TTY::Table.new(header: ['#', *headers], rows: indexed)
-  table.render(:unicode, padding: [0, 1]) + "\n"
+  "#{table.render(:unicode, padding: [0, 1])}\n"
 end
 
 def format_json(headers, rows)
   data = rows.each_with_index.map do |r, i|
     { '_id' => i }.merge(headers.zip(r).to_h)
   end
-  JSON.pretty_generate(data) + "\n"
+  "#{JSON.pretty_generate(data)}\n"
 end
 
 def format_error(msg)
@@ -74,10 +76,10 @@ get '/' do
   files = Dir.glob(File.join(CSV_DIR, '*.csv')).map { |f| File.basename(f, '.csv') }
   if wants_json?
     content_type 'application/json'
-    JSON.pretty_generate(files) + "\n"
+    "#{JSON.pretty_generate(files)}\n"
   else
     content_type 'text/plain'
-    "Available tables:\n" + files.map { |f| "  #{f}" }.join("\n") + "\n"
+    "Available tables:\n#{files.map { |f| "  #{f}" }.join("\n")}\n"
   end
 end
 
@@ -138,7 +140,7 @@ post '/:name/create' do
   halt 409, format_error("'#{params[:name]}' already exists") if File.exist?(path)
   body_params = parse_body
   headers = body_params['headers']&.split(',')&.map(&:strip)
-  halt 400, format_error("Provide headers=col1,col2,...") unless headers&.any?
+  halt 400, format_error('Provide headers=col1,col2,...') unless headers&.any?
   FileUtils.mkdir_p(CSV_DIR)
   CSV.open(path, 'w') { |csv| csv << headers }
   content_type 'text/plain'
@@ -149,7 +151,11 @@ end
 def parse_body
   ct = request.content_type || ''
   if ct.include?('application/json')
-    JSON.parse(request.body.read) rescue {}
+    begin
+      JSON.parse(request.body.read)
+    rescue StandardError
+      {}
+    end
   else
     # form-encoded key=value&key2=value2
     raw = request.body.read
